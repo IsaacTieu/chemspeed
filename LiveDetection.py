@@ -205,7 +205,7 @@ while True:
 
         current_time = datetime.datetime.now()
         frame_average_color[i] = [average_red, average_green, average_blue, current_time]
-        
+
     colors.append(frame_average_color) #change later to account for data file
 
     frame_counter += 1
@@ -263,6 +263,12 @@ cv2.destroyAllWindows()
 
 with open("output.mp4", "wb") as f:
     f.write(output_memory_file.getbuffer())
+
+colors = np.reshape(colors, (-1, 4))
+colors_per_second = np.reshape(colors_per_second, (-1, 4))
+# print(colors)
+# print(colors_per_second)
+# print(color_change_data)
 
 
 color_df = pd.DataFrame(colors, columns=['Red', 'Green', 'Blue', 'Current time: Date / HH:MM:SS'])
