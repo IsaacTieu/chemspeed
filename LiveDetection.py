@@ -26,17 +26,20 @@ from utils import file_check
 # There will be a lot of trial and error figuring out the right camera, because the number can hop around.
 camera = 0
 warning_sign_length = 60
+font = cv2.FONT_HERSHEY_SIMPLEX
+color = (0, 0, 0)
+thickness = 3
 
 print("Hold down your mouse and move it to select the region of interest")
 print("Press 'q' once finished to move on. Make sure NUMLOCK is locking the number pad.")
 
+# Camera dimensions
 vid = cv2.VideoCapture(camera, cv2.CAP_DSHOW)
 fps = int(vid.get(cv2.CAP_PROP_FPS))
 width  = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
 height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
-color = (0, 0, 0)
-thickness = 3
 
+# Region of interest variables
 starts = []
 ends = []
 start = None
@@ -106,17 +109,19 @@ print("Once done taking measurements, press 'q' to save and export the data.")
 
 vid = cv2.VideoCapture(camera, cv2.CAP_DSHOW)
 
+# Output data
 colors = []
 color_change_data = []
 colors_per_second = []
 notes = []
 
+# Internal counters
 frame_counter = 0
 warning_counter = 0
 prev_color = None
 warning = False
-font = cv2.FONT_HERSHEY_SIMPLEX
 
+# Video saving feature
 output_memory_file = io.BytesIO()
 output = av.open(output_memory_file, 'w', format="mp4")
 stream = output.add_stream('h264', fps)
@@ -153,20 +158,19 @@ while True:
         test_color = np.array(colors[-1])
         #color_diff = [abs(x - y) for x, y in zip(test_color, prev_color)] #[B, G, R]
         color_diff = np.abs(test_color - prev_color)
-        print(color_diff)
+        #print(color_diff)
         for reg in range(num_regions):
-            for i in range(3): # The -1 avoids the current time.
-                color_value = color_diff[reg][reg][i]
-                if isinstance(color_value, np.float64):
-                    if color_value > int(user_inputs[i]):
-                        warning = True
-                        warning_counter = 0
-                        current_time = datetime.datetime.now()
-                        # data = (current_time, color_diff[reg, i, 0], color_diff[reg, i, 1], color_diff[reg, i, 2],
-                        #                           len(colors) + 1, len(colors_per_second) + 1, i,
-                        #         test_color[reg, 0], test_color[reg, 1], test_color[reg, 2])
-                        # color_change_data.append(data)
-                        break
+            for i in range(3): # Avoids the time object.
+                color_value = color_diff[reg][i]
+                if color_value > int(user_inputs[i]):
+                    warning = True
+                    warning_counter = 0
+                    current_time = datetime.datetime.now()
+                    data = (current_time, color_diff[reg][0], color_diff[reg][1], color_diff[reg][2],
+                                              len(colors) + 1, len(colors_per_second) + 1, i,
+                            test_color[reg][0], test_color[reg][1], test_color[reg][2])
+                    color_change_data.append(data)
+                    break
 
     # If a color change is detected, a warning message is displayed.
     if warning:
@@ -200,8 +204,8 @@ while True:
 
 
         current_time = datetime.datetime.now()
-        frame_average_color[i].append([average_red, average_green, average_blue])
-        # frame_average_color[i].append([average_red, average_green, average_blue, current_time])
+        frame_average_color[i] = [average_red, average_green, average_blue, current_time]
+        
     colors.append(frame_average_color) #change later to account for data file
 
     frame_counter += 1
