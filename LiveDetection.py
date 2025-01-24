@@ -14,6 +14,8 @@ import datetime
 import av
 import io
 import matplotlib.pyplot as plt
+import utils
+from utils import file_check
 
 # https://stackoverflow.com/questions/73609006/how-to-create-a-video-out-of-frames-without-saving-it-to-disk-using-python
 # Video capturing code taken from here
@@ -24,7 +26,6 @@ import matplotlib.pyplot as plt
 # There will be a lot of trial and error figuring out the right camera, because the number can hop around.
 camera = 0
 warning_sign_length = 60
-possible_inputs = ['yes', ' yes', 'yes ', 'YES', ' YES', 'YES ', "'yes'", "'Yes'", 'ye']
 
 print("Hold down your mouse and move it to select the region of interest")
 print("Press 'q' once finished to move on. Make sure NUMLOCK is locking the number pad.")
@@ -36,6 +37,8 @@ height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
 color = (0, 0, 0)
 thickness = 3
 
+starts = []
+ends = []
 start = None
 end = None
 drawing = False
@@ -56,12 +59,18 @@ def draw_rectangle(event, x, y, flags, param):
         drawing = False
         end = (x, y)
 
+
 cv2.namedWindow("rectangle")
 cv2.setMouseCallback("rectangle", draw_rectangle)
 
+
 # This is the loop where the ROI is drawn.
+print("Press 'u' if you want to save a region of interest")
 while True:
     _, image = vid.read()
+    if starts and ends:
+        for i in range(len(starts)):
+            image = cv2.rectangle(image, starts[i], ends[i], color, thickness)
 
     if start and end:
         image = cv2.rectangle(image, start, end, color, thickness)
@@ -73,12 +82,15 @@ while True:
     key = cv2.waitKey(1)
     if key & 0xFF == ord('q'):
         break
+    if key == ord('u'):
+        starts.append(start)
+        ends.append(end)
 
 vid.release()
 cv2.destroyAllWindows()
 
 if os.path.exists('output.mp4'):
-    if not input("Type yes if you have moved 'output.mp4': ") in possible_inputs:
+    if not input("Type yes if you have moved 'output.mp4': ") in utils.possible_inputs:
         print("'output.mp4' will be replaced.")
 
 print("If you don't want to detect a certain value, then type '256' because that is higher than the max difference.")
@@ -113,13 +125,15 @@ stream.height = height
 stream.pix_fmt = 'yuv420p'
 stream.options = {'crf': '17'}  # Lower crf = better quality & more file space.
 
-fig, ax = plt.subplots(1, 3, figsize=(6, 2))
-x_data = []
-red_plot = []
-green_plot = []
-blue_plot = []
-x_axis_counter = 0
+# fig, ax = plt.subplots(1, 3, figsize=(6, 2))
+# x_data = []
+# red_plot = []
+# green_plot = []
+# blue_plot = []
+# x_axis_counter = 0
+
 start_time = time.time()
+num_regions = len(starts)
 
 while True:
     _, frame = vid.read()
@@ -128,7 +142,7 @@ while True:
 
     # This section detects change in color based on user input and displays a warning sign.
     if frame_counter == 1:
-        prev_color = colors[-1]
+        prev_color = np.array(colors[-1])
     # The warning sign will be on for 90 frames (3 seconds).
     if warning_counter == warning_sign_length:
         warning = False
@@ -136,18 +150,23 @@ while True:
     if time_diff >= 1:
         start_time = end_time
         frame_counter = 0
-        test_color = colors[-1]
-        color_diff = [abs(x - y) for x, y in zip(test_color, prev_color)] #[B, G, R]
-        for i in range(len(color_diff) - 1): # The -1 avoids the current time.
-            if int(color_diff[i]) > int(user_inputs[i]):
-                warning = True
-                warning_counter = 0
-                current_time = datetime.datetime.now()
-                data = (current_time, color_diff[0], color_diff[1], color_diff[2],
-                                          len(colors) + 1, len(colors_per_second) + 1, i,
-                        test_color[0], test_color[1], test_color[2])
-                color_change_data.append(data)
-                break
+        test_color = np.array(colors[-1])
+        #color_diff = [abs(x - y) for x, y in zip(test_color, prev_color)] #[B, G, R]
+        color_diff = np.abs(test_color - prev_color)
+        print(color_diff)
+        for reg in range(num_regions):
+            for i in range(3): # The -1 avoids the current time.
+                color_value = color_diff[reg][reg][i]
+                if isinstance(color_value, np.float64):
+                    if color_value > int(user_inputs[i]):
+                        warning = True
+                        warning_counter = 0
+                        current_time = datetime.datetime.now()
+                        # data = (current_time, color_diff[reg, i, 0], color_diff[reg, i, 1], color_diff[reg, i, 2],
+                        #                           len(colors) + 1, len(colors_per_second) + 1, i,
+                        #         test_color[reg, 0], test_color[reg, 1], test_color[reg, 2])
+                        # color_change_data.append(data)
+                        break
 
     # If a color change is detected, a warning message is displayed.
     if warning:
@@ -158,28 +177,32 @@ while True:
         frame = cv2.putText(frame, text, (x, y), font, 1,
                             (255, 0, 0), 3)
 
-    # start and end are determined from the original ROI changer.
-    frame = cv2.rectangle(frame, start, end, color, thickness)
+    for i in range(num_regions):
+        frame = cv2.rectangle(frame, starts[i], ends[i], color, thickness)
 
     # This finds the average of all the pixel values in the square for one frame
-    reds = []
-    greens = []
-    blues = []
+    reds = [[]] * num_regions
+    greens = [[]] * num_regions
+    blues = [[]] * num_regions
+    frame_average_color = [[]] * num_regions
 
-    for r in range(start[1] + thickness, end[1] - thickness):
-        for c in range(start[0] + thickness, end[0] - thickness):
-            pixel = frame[r][c] # List of the 3 RGB values as [B, G, R]
-            blues.append(pixel[0])
-            greens.append(pixel[1])
-            reds.append(pixel[2])
+    for i in range(len(starts)):
+        for r in range(starts[i][1] + thickness, ends[i][1] - thickness):
+            for c in range(starts[i][0] + thickness, ends[i][0] - thickness):
+                pixel = frame[r][c] # List of the 3 RGB values as [B, G, R]
+                blues[i].append(pixel[0])
+                greens[i].append(pixel[1])
+                reds[i].append(pixel[2])
 
-    average_red = np.mean(reds)
-    average_green = np.mean(greens)
-    average_blue = np.mean(blues)
+        average_red = np.mean(reds[i])
+        average_green = np.mean(greens[i])
+        average_blue = np.mean(blues[i])
 
-    current_time = datetime.datetime.now()
-    frame_average_color = [average_red, average_green, average_blue, current_time]
-    colors.append(frame_average_color)
+
+        current_time = datetime.datetime.now()
+        frame_average_color[i].append([average_red, average_green, average_blue])
+        # frame_average_color[i].append([average_red, average_green, average_blue, current_time])
+    colors.append(frame_average_color) #change later to account for data file
 
     frame_counter += 1
     if warning_counter < warning_sign_length:
@@ -192,30 +215,30 @@ while True:
     packet = stream.encode(image)
     output.mux(packet)  # Write the encoded frame to MP4 file.
 
-    # Live data visualization
-    x_data.append(x_axis_counter)
-    x_axis_counter += 1
-    red_plot.append(frame_average_color[0])
-    green_plot.append(frame_average_color[1])
-    blue_plot.append(frame_average_color[2])
-
-    ax[0].clear()
-    ax[1].clear()
-    ax[2].clear()
-
-    ax[0].plot(x_data, red_plot, color='r', label='Red')
-    ax[1].plot(x_data, green_plot, color='g', label='Green')
-    ax[2].plot(x_data, blue_plot, color='b', label='Blue')
-
-    ax[0].legend()
-    ax[1].legend()
-    ax[2].legend()
-
-    plt.draw()
-    plt.pause(0.01)
+    # # Live data visualization
+    # x_data.append(x_axis_counter)
+    # x_axis_counter += 1
+    # red_plot.append(frame_average_color[0])
+    # green_plot.append(frame_average_color[1])
+    # blue_plot.append(frame_average_color[2])
+    #
+    # ax[0].clear()
+    # ax[1].clear()
+    # ax[2].clear()
+    #
+    # ax[0].plot(x_data, red_plot, color='r', label='Red')
+    # ax[1].plot(x_data, green_plot, color='g', label='Green')
+    # ax[2].plot(x_data, blue_plot, color='b', label='Blue')
+    #
+    # ax[0].legend()
+    # ax[1].legend()
+    # ax[2].legend()
+    #
+    # plt.draw()
+    # plt.pause(0.01)
 
     cv2.imshow("Live webcam video", frame)
-    plt.show(block=False)
+    # plt.show(block=False)
 
 
     # Press the video window and then 'q' to quit and export the color data
@@ -232,7 +255,7 @@ packet = stream.encode(None)
 output.mux(packet)
 output.close()
 cv2.destroyAllWindows()
-plt.close()
+# plt.close()
 
 with open("output.mp4", "wb") as f:
     f.write(output_memory_file.getbuffer())
@@ -256,31 +279,6 @@ notes_df = pd.DataFrame(notes, columns=['Color Table Row Number of note',
                                         'Current time: Date / HH:MM:SS'])
 
 
-def file_check(file_path, dataframe, file_name):
-    if os.path.exists(file_path):
-        first_yes = input(f"Enter 'yes' to continue after you have moved '{file_path}' to another folder. "
-                    f"If not moved, the current file will be overwritten. \n"
-                    f"If something else is entered, the old file will stay and the current file will be lost: ")
-        if first_yes in possible_inputs:
-            try:
-                dataframe.to_csv(file_name, mode='w', index=False)
-            except PermissionError:
-                error_input = input("There is a permission error happening. Try closing the excel."
-                                    "Type 'yes' once done.")
-                if error_input in possible_inputs:
-                    dataframe.to_csv(file_name, mode='w', index=False)
-        else:
-            second_yes = input('Last chance to save the file. Type "yes" to save the file ')
-            if second_yes in possible_inputs:
-                try:
-                    dataframe.to_csv(file_name, mode='w', index=False)
-                except PermissionError:
-                    error_input = input("There is a permission error happening. Try closing the excel."
-                                        "Type 'yes' once done.")
-                    if error_input in possible_inputs:
-                        dataframe.to_csv(file_name, mode='w', index=False)
-    else:
-        dataframe.to_csv(file_name, mode='w', index=False)
 
 
 
